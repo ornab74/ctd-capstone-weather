@@ -1,0 +1,10 @@
+city,observed_local,condition,temperature_raw,source_url,scraped_at_utc
+New York *,Thu 14:00,Partly sunny,27 °C,https://www.timeanddate.com/weather/usa/new-york,2026-08-24T02:44:17+00:00
+London *,Thu 19:00,Light rain,18 °C,https://www.timeanddate.com/weather/uk/london,2026-08-24T02:44:17+00:00
+Tokyo,Fri 03:00,Clear,31 °C,https://www.timeanddate.com/weather/japan/tokyo,2026-08-24T02:44:17+00:00
+Sydney,Fri 04:00,Sunny,16 °C,https://www.timeanddate.com/weather/australia/sydney,2026-08-24T02:44:17+00:00
+Cape Town,Thu 20:00,Cloudy,13 °C,https://www.timeanddate.com/weather/south-africa/cape-town,2026-08-24T02:44:17+00:00
+Dubai,Thu 22:00,Clear,38 °C,https://www.timeanddate.com/weather/uae/dubai,2026-08-24T02:44:17+00:00
+Toronto *,Thu 14:00,Passing clouds,24 °C,https://www.timeanddate.com/weather/canada/toronto,2026-08-24T02:44:17+00:00
+Rio de Janeiro,Thu 15:00,Sunny,29 °C,https://www.timeanddate.com/weather/brazil/rio-de-janeiro,2026-08-24T02:44:17+00:00
+Nairobi,Thu 21:00,Overcast,20 °C,https://www.timeanddate.com/weather/kenya/nairobi,2026-08-24T02:44:17+00:00

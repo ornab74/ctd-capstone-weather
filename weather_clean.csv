@@ -1,0 +1,10 @@
+city,observed_local,condition,temperature_raw,source_url,scraped_at_utc,temperature_c,temperature_f,temperature_band
+Dubai,Thu 22:00,Clear,38 °C,https://www.timeanddate.com/weather/uae/dubai,2026-08-24T02:44:17+00:00,38.0,100.4,hot
+Tokyo,Fri 03:00,Clear,31 °C,https://www.timeanddate.com/weather/japan/tokyo,2026-08-24T02:44:17+00:00,31.0,87.8,hot
+Rio de Janeiro,Thu 15:00,Sunny,29 °C,https://www.timeanddate.com/weather/brazil/rio-de-janeiro,2026-08-24T02:44:17+00:00,29.0,84.2,warm
+New York,Thu 14:00,Partly sunny,27 °C,https://www.timeanddate.com/weather/usa/new-york,2026-08-24T02:44:17+00:00,27.0,80.6,warm
+Toronto,Thu 14:00,Passing clouds,24 °C,https://www.timeanddate.com/weather/canada/toronto,2026-08-24T02:44:17+00:00,24.0,75.2,warm
+Nairobi,Thu 21:00,Overcast,20 °C,https://www.timeanddate.com/weather/kenya/nairobi,2026-08-24T02:44:17+00:00,20.0,68.0,warm
+London,Thu 19:00,Light rain,18 °C,https://www.timeanddate.com/weather/uk/london,2026-08-24T02:44:17+00:00,18.0,64.4,mild
+Sydney,Fri 04:00,Sunny,16 °C,https://www.timeanddate.com/weather/australia/sydney,2026-08-24T02:44:17+00:00,16.0,60.8,mild
+Cape Town,Thu 20:00,Cloudy,13 °C,https://www.timeanddate.com/weather/south-africa/cape-town,2026-08-24T02:44:17+00:00,13.0,55.4,mild
