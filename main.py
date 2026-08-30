@@ -1,27 +1,32 @@
 from __future__ import annotations
+
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 import re
+import sqlite3
+
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
 
-# Weather site I am using for weather data
-WEATHER_URL = "https://www.timeanddate.com/weather/"
 
-# Give my scraper a user agent name
+# Main project paths.
+WEATHER_URL = "https://www.timeanddate.com/weather/"
 USER_AGENT = "weather-scraping-capstone/1.0"
 
-# Save the finished CSV into the same folder as the python file
-OUTPUT_PATH = Path(__file__).resolve().parent / "weather.csv"
+BASE_DIR = Path(__file__).resolve().parent
+
+RAW_CSV = BASE_DIR / "weather_raw.csv"
+CLEAN_CSV = BASE_DIR / "weather_clean.csv"
+DB_PATH = BASE_DIR / "weather.db"
+
 
 @dataclass(frozen=True, slots=True)
 class WeatherRecord:
-    # I made one structure for each weather result so the data stays
-    # organized before I turn everything into a pandas DataFrame.
+    # Keep each scraped result in the same shape before Pandas.
     city: str
     observed_local: str
     condition: str
@@ -29,31 +34,30 @@ class WeatherRecord:
     source_url: str
     scraped_at_utc: str
 
+
 def text_of(element, fallback: str = "Unknown") -> str:
-    # Selenium sometimes gives text back with extra spaces or line breaks,
-    # so I clean it up here instead of repeating this everywhere.
+    # Clean up extra spaces Selenium sometimes gives me.
     value = " ".join(element.text.split())
     return value or fallback
 
+
 def condition_of(cell) -> str:
-    # I only use the text Selenium finds in the condition cell.
     return text_of(cell)
 
+
 def create_driver() -> webdriver.Chrome:
-    # These are the Chrome settings I am using for the scraper.
     options = webdriver.ChromeOptions()
 
-    # Headless mode lets the browser run without opening a visible window.
+    # Run Chromium without opening a browser window.
     options.add_argument("--headless=new")
     options.add_argument("--disable-extensions")
     options.add_argument("--no-first-run")
     options.add_argument(f"--user-agent={USER_AGENT}")
 
-    # I do not need to wait for every resource on the page
-    # before I start looking for the weather table.
     options.page_load_strategy = "eager"
 
     return webdriver.Chrome(options=options)
+
 
 def scrape() -> list[WeatherRecord]:
     driver = create_driver()
@@ -61,46 +65,51 @@ def scrape() -> list[WeatherRecord]:
     try:
         driver.get(WEATHER_URL)
 
-        # Instead of using time.sleep(), I wait until Selenium can
-        # actually find the weather table.
+        # Wait for the weather table instead of using sleep().
         table = WebDriverWait(driver, 20).until(
             EC.presence_of_element_located(
                 (By.CSS_SELECTOR, "#wt-tb, table.zebra, table")
             )
         )
 
-        # Weather changes constantly, so I also save when I scraped it.
-        scraped_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
+        scraped_at = datetime.now(timezone.utc).isoformat(
+            timespec="seconds"
+        )
 
         records: list[WeatherRecord] = []
-
-        # I use this to avoid saving the same city and observation twice.
         seen: set[tuple[str, str]] = set()
 
         for row in table.find_elements(By.CSS_SELECTOR, "tr"):
             cells = row.find_elements(By.CSS_SELECTOR, "td")
 
-            # The page puts the data into groups of four:
-            # city, time, condition, and temperature.
+            # The table data comes in groups of four cells.
             for start in range(0, len(cells) - 3, 4):
-                city_cell, time_cell, condition_cell, temperature_cell = (
-                    cells[start : start + 4]
-                )
+                (
+                    city_cell,
+                    time_cell,
+                    condition_cell,
+                    temperature_cell,
+                ) = cells[start:start + 4]
 
                 city = text_of(city_cell, "")
                 observed = text_of(time_cell)
                 condition = condition_of(condition_cell)
                 temperature = text_of(temperature_cell, "")
 
-                # If the row is missing the important stuff or I already
-                # collected it, I just skip it.
-                if not city or not temperature or (city, observed) in seen:
+                # Skip bad rows and anything I already collected.
+                if (
+                    not city
+                    or not temperature
+                    or (city, observed) in seen
+                ):
                     continue
 
                 seen.add((city, observed))
 
-                # I also save the city's link when the page gives me one.
-                links = city_cell.find_elements(By.CSS_SELECTOR, "a[href]")
+                links = city_cell.find_elements(
+                    By.CSS_SELECTOR,
+                    "a[href]",
+                )
 
                 source_url = (
                     links[0].get_attribute("href")
@@ -122,12 +131,12 @@ def scrape() -> list[WeatherRecord]:
         return records
 
     finally:
-        # Close Chrome if something goes wrong
+        # Make sure Chrome closes even if the scrape fails.
         driver.quit()
 
+
 def temperature_c(value: object) -> float | None:
-    # The scraped temperature is still text at this point.
-    # This regex pulls the actual number and the C/F unit out of it.
+    # Pull the temperature number and unit out of the scraped text.
     match = re.search(
         r"(-?\d+(?:\.\d+)?)\s*°?\s*([CF])?",
         str(value),
@@ -138,23 +147,33 @@ def temperature_c(value: object) -> float | None:
         return None
 
     number = float(match.group(1))
+    unit = (match.group(2) or "C").upper()
 
-    # I picked Celsius as the main value for cleaning the data,
-    # so Fahrenheit values get converted here.
-    if (match.group(2) or "C").upper() == "F":
+    if unit == "F":
         number = (number - 32) * 5 / 9
 
     return round(number, 1)
 
-def clean(records: list[WeatherRecord]) -> pd.DataFrame:
-    if not records:
-        raise RuntimeError("the scraper returned no records")
 
-    # Now that scraping is finished I can convert the records into pandas.
-    frame = pd.DataFrame(asdict(record) for record in records)
+def temperature_band(temp_c: float) -> str:
+    # These groups should be useful for the dashboard later.
+    if temp_c >= 30:
+        return "hot"
 
-    # A few city names can have an asterisk from the website,
-    # so I remove that before saving the final data.
+    if temp_c >= 20:
+        return "warm"
+
+    if temp_c >= 10:
+        return "mild"
+
+    return "cold"
+
+
+def clean(raw_frame: pd.DataFrame) -> pd.DataFrame:
+    # Leave the original scrape untouched.
+    frame = raw_frame.copy()
+
+    # Timeanddate sometimes puts an asterisk beside city names.
     frame["city"] = (
         frame["city"]
         .str.replace("*", "", regex=False)
@@ -173,44 +192,246 @@ def clean(records: list[WeatherRecord]) -> pd.DataFrame:
         .str.strip()
     )
 
-    # Keeping the original temperature but also making a numeric Celsius column
-    frame["temperature_c"] = frame["temperature_raw"].map(temperature_c)
-
-    # Rows without a usable city or temperature are not useful to me.
-    frame = frame.dropna(subset=["city", "temperature_c"])
-    frame = frame[frame["city"].ne("")]
-
-    # One more duplicate check after the cleaning step.
-    frame = frame.drop_duplicates(
-        subset=["city", "observed_local", "temperature_c"]
+    # Turn the temperature text into something I can calculate with.
+    frame["temperature_c"] = (
+        frame["temperature_raw"]
+        .map(temperature_c)
     )
 
-    # I decided to keep Fahrenheit too since that will probably be
-    # easier to read for some people later.
+    frame = frame.dropna(
+        subset=[
+            "city",
+            "temperature_c",
+            "source_url",
+            "scraped_at_utc",
+        ]
+    )
+
+    frame = frame[frame["city"].ne("")]
+
+    # One more duplicate check after cleaning.
+    frame = frame.drop_duplicates(
+        subset=[
+            "city",
+            "observed_local",
+            "scraped_at_utc",
+        ]
+    )
+
     frame["temperature_f"] = (
         frame["temperature_c"] * 9 / 5 + 32
     ).round(1)
 
-    # I am just sorting the finished data from hottest to coolest. As I think i want
-    # to do a hot/cool visualization with streamlit later in the project
+    frame["temperature_band"] = (
+        frame["temperature_c"]
+        .map(temperature_band)
+    )
+
+    # Hottest cities first makes the output easier to check.
     return frame.sort_values(
         ["temperature_c", "city"],
         ascending=[False, True],
     ).reset_index(drop=True)
 
-def save_csv(frame: pd.DataFrame) -> None:
-    # Save the cleaned data into a CSV file
-    frame.to_csv(OUTPUT_PATH, index=False)
 
-def main() -> None:
-    # The scraper's entry point is this main() function,
-    frame = clean(records)
-    save_csv(frame)
+def save_csvs(
+    raw_frame: pd.DataFrame,
+    clean_frame: pd.DataFrame,
+) -> None:
+    # Keep both stages so I can compare them later.
+    raw_frame.to_csv(RAW_CSV, index=False)
+    clean_frame.to_csv(CLEAN_CSV, index=False)
+
+
+def save_database(
+    raw_frame: pd.DataFrame,
+    clean_frame: pd.DataFrame,
+) -> None:
+    with sqlite3.connect(DB_PATH) as conn:
+        # Keep the original scrape separate from the transformed data.
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS weather_raw (
+                id INTEGER PRIMARY KEY,
+                city TEXT NOT NULL,
+                observed_local TEXT,
+                condition TEXT,
+                temperature_raw TEXT,
+                source_url TEXT NOT NULL,
+                scraped_at_utc TEXT NOT NULL
+            )
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS weather_clean (
+                id INTEGER PRIMARY KEY,
+                city TEXT NOT NULL,
+                observed_local TEXT,
+                condition TEXT,
+                temperature_raw TEXT,
+                source_url TEXT NOT NULL,
+                scraped_at_utc TEXT NOT NULL,
+                temperature_c REAL NOT NULL,
+                temperature_f REAL NOT NULL,
+                temperature_band TEXT NOT NULL
+            )
+            """
+        )
+
+        # I only want the latest scrape in these tables for now.
+        conn.execute("DELETE FROM weather_raw")
+        conn.execute("DELETE FROM weather_clean")
+
+        raw_rows = raw_frame[
+            [
+                "city",
+                "observed_local",
+                "condition",
+                "temperature_raw",
+                "source_url",
+                "scraped_at_utc",
+            ]
+        ].itertuples(index=False, name=None)
+
+        conn.executemany(
+            """
+            INSERT INTO weather_raw (
+                city,
+                observed_local,
+                condition,
+                temperature_raw,
+                source_url,
+                scraped_at_utc
+            )
+            VALUES (?, ?, ?, ?, ?, ?)
+            """,
+            raw_rows,
+        )
+
+        clean_rows = clean_frame[
+            [
+                "city",
+                "observed_local",
+                "condition",
+                "temperature_raw",
+                "source_url",
+                "scraped_at_utc",
+                "temperature_c",
+                "temperature_f",
+                "temperature_band",
+            ]
+        ].itertuples(index=False, name=None)
+
+        conn.executemany(
+            """
+            INSERT INTO weather_clean (
+                city,
+                observed_local,
+                condition,
+                temperature_raw,
+                source_url,
+                scraped_at_utc,
+                temperature_c,
+                temperature_f,
+                temperature_band
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            clean_rows,
+        )
+
+        # These are fields I will probably query and filter by later.
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_weather_clean_city
+            ON weather_clean(city)
+            """
+        )
+
+        conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_weather_clean_band
+            ON weather_clean(temperature_band)
+            """
+        )
+
+        # Quick check that both tables actually got populated.
+        raw_count = conn.execute(
+            "SELECT COUNT(*) FROM weather_raw"
+        ).fetchone()[0]
+
+        clean_count = conn.execute(
+            "SELECT COUNT(*) FROM weather_clean"
+        ).fetchone()[0]
 
     print(
-        f"Scraped {len(records)} rows. "
-        f"Saved {len(frame)} clean rows to {OUTPUT_PATH.name}"
+        f"Database saved: {DB_PATH.name} "
+        f"({raw_count} raw rows, {clean_count} clean rows)"
     )
+
+
+def show_cleaning_results(
+    raw_frame: pd.DataFrame,
+    clean_frame: pd.DataFrame,
+) -> None:
+    # Show the before/after part of the cleaning rubric.
+    print("\n--- Before Cleaning ---")
+    print(raw_frame.head())
+    print(f"Rows: {len(raw_frame)}")
+
+    print("\n--- After Cleaning ---")
+    print(clean_frame.head())
+    print(f"Rows: {len(clean_frame)}")
+
+    print("\n--- Temperature Summary ---")
+
+    summary = (
+        clean_frame
+        .groupby("temperature_band")["temperature_c"]
+        .agg(["count", "mean", "min", "max"])
+        .round(1)
+    )
+
+    print(summary)
+
+
+def main() -> None:
+    records = scrape()
+
+    if not records:
+        raise RuntimeError("the scraper returned no records")
+
+    # Save the raw stage before doing any cleaning.
+    raw_frame = pd.DataFrame(
+        asdict(record)
+        for record in records
+    )
+
+    clean_frame = clean(raw_frame)
+
+    show_cleaning_results(
+        raw_frame,
+        clean_frame,
+    )
+
+    save_csvs(
+        raw_frame,
+        clean_frame,
+    )
+
+    # The same two stages also go into SQLite.
+    save_database(
+        raw_frame,
+        clean_frame,
+    )
+
+    print(
+        f"\nScraped {len(raw_frame)} rows. "
+        f"Saved {len(clean_frame)} clean rows."
+    )
+
 
 if __name__ == "__main__":
     main()
