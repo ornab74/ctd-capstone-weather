@@ -1,4 +1,5 @@
-# CTD Weather Scraping Capstone Week One
+# CTD Weather Scraping Capstone
+# Assignment 9
 
 ## Installation
 
@@ -21,4 +22,15 @@ Weather data will be saved as:
 ```text
 weather.csv
 ```
- 
+
+This project collects weather data and cleans it with Pandas.
+# Assignment 10 
+## Database portion
+
+The database step uses the existing `weather_raw.csv` file. Our code cleans and transforms the data then updates `weather_clean.csv`. After transformation we perform saves for both stages into `weather.db`.
+
+Run:
+
+```bash
+python database.py
+```
