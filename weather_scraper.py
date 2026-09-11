@@ -1,12 +1,10 @@
-"""Selenium scraper, cleaning pipeline, and SQLite export for the weather capstone."""
 from __future__ import annotations
-
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 import re
 import sqlite3
-
+from urllib.parse import urldefrag, urljoin, urlsplit
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.common.by import By
@@ -21,6 +19,10 @@ CLEAN_PATH = DATA_DIR / "weather_clean.csv"
 DB_PATH = DB_DIR / "weather.db"
 WEATHER_URL = "https://www.timeanddate.com/weather/"
 USER_AGENT = "weather-scraping-capstone/1.0"
+NEXT_PAGE_SELECTOR = (
+    'a[rel~="next"], .pagination a.next, .pagination .next a, '
+    '.pagination a[aria-label="Next"], a[aria-label="Next page"]'
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,7 +36,7 @@ class WeatherRecord:
 
 
 def text_of(element, fallback: str = "Unknown") -> str:
-    """Normalize whitespace from a Selenium element and provide a fallback."""
+    # normalize whitespace from a Selenium element and provide a fallback
     value = " ".join(element.text.split())
     return value or fallback
 
@@ -50,19 +52,61 @@ def create_driver() -> webdriver.Chrome:
     return webdriver.Chrome(options=options)
 
 
-def scrape() -> list[WeatherRecord]:
-    """Collect one weather observation per unique city/local-time pair."""
-    driver = create_driver()
-    try:
-        driver.get(WEATHER_URL)
-        table = WebDriverWait(driver, 20).until(
+def weather_tables(driver, max_pages: int = 100):
+    # yield each table, following enabled next links without revisiting URLs."""
+    if max_pages < 1:
+        raise ValueError("max_pages must be at least 1")
+    next_url = WEATHER_URL
+    visited: set[str] = set()
+    for _ in range(max_pages):
+        driver.get(next_url)
+        current_url = urldefrag(driver.current_url)[0]
+        if current_url in visited:
+            return
+        visited.add(current_url)
+        yield WebDriverWait(driver, 20).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, "#wt-tb, table.zebra, table"))
         )
+
+        next_url = None
+        for link in driver.find_elements(By.CSS_SELECTOR, NEXT_PAGE_SELECTOR):
+            disabled = link.find_elements(
+                By.XPATH,
+                "./ancestor-or-self::*[@disabled or @aria-disabled='true' or "
+                "contains(concat(' ', normalize-space(@class), ' '), ' disabled ')]",
+            )
+            if disabled or not link.is_displayed() or not link.is_enabled():
+                continue
+            href = link.get_attribute("href")
+            if not href:
+                continue
+            candidate = urldefrag(urljoin(current_url, href))[0]
+            if (urlsplit(candidate).scheme not in {"http", "https"}
+                    or urlsplit(candidate).netloc != urlsplit(WEATHER_URL).netloc):
+                continue
+            if candidate in visited:
+                return
+            next_url = candidate
+            break
+        if next_url is None:
+            return
+    raise RuntimeError(f"Pagination exceeded {max_pages} pages; outputs were not saved.")
+
+
+def scrape() -> list[WeatherRecord]:
+    # collect one weather observation per unique city/local-time pair
+    driver = create_driver()
+    try:
         scraped_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
         records: list[WeatherRecord] = []
         seen: set[tuple[str, str]] = set()
 
-        for row in table.find_elements(By.CSS_SELECTOR, "tr"):
+        rows = (
+            row
+            for table in weather_tables(driver)
+            for row in table.find_elements(By.CSS_SELECTOR, "tr")
+        )
+        for row in rows:
             cells = row.find_elements(By.CSS_SELECTOR, "td")
             # The source page presents repeating groups of city, time, condition, temperature.
             for start in range(0, len(cells) - 3, 4):
@@ -95,7 +139,7 @@ def scrape() -> list[WeatherRecord]:
 
 
 def temperature_c(value: object) -> float | None:
-    """Convert scraped C/F temperature text to numeric Celsius."""
+    # convert scraped C/F temperature text to numeric Celsius
     match = re.search(r"(-?\d+(?:\.\d+)?)\s*°?\s*([CF])?", str(value), re.IGNORECASE)
     if not match:
         return None
@@ -106,7 +150,7 @@ def temperature_c(value: object) -> float | None:
 
 
 def temperature_band(value: float) -> str:
-    """Group temperatures into simple bands used by the dashboard filters."""
+    # group temperatures into simple bands used by the dashboard filters
     if value < 20:
         return "mild"
     if value < 30:
@@ -115,12 +159,12 @@ def temperature_band(value: float) -> str:
 
 
 def raw_frame(records: list[WeatherRecord]) -> pd.DataFrame:
-    """Create the uncleaned DataFrame used for the before-cleaning CSV."""
+    # create the uncleaned DataFrame used for the before-cleaning CSV
     return pd.DataFrame(asdict(record) for record in records)
 
 
 def clean(frame: pd.DataFrame) -> pd.DataFrame:
-    """Clean raw observations and add numeric/unit and grouping features."""
+    # clean raw observations and add numeric/unit and grouping features
     if frame.empty:
         raise RuntimeError("The scraper returned no records.")
 
@@ -143,7 +187,7 @@ def clean(frame: pd.DataFrame) -> pd.DataFrame:
 
 
 def save_outputs(raw: pd.DataFrame, cleaned: pd.DataFrame) -> None:
-    """Persist before/after CSV files and the cleaned SQLite table."""
+    # persist before/after CSV files and the cleaned SQLite table
     DATA_DIR.mkdir(parents=True, exist_ok=True)
     DB_DIR.mkdir(parents=True, exist_ok=True)
     raw.to_csv(RAW_PATH, index=False)
