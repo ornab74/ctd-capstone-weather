@@ -72,3 +72,6 @@ streamlit run streamlit_app.py
 
 
  ```
+
+# License 
+GPL3 
