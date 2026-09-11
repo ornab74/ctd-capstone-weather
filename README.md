@@ -39,8 +39,8 @@ sudo apt install python3 python3-venv python3-pip -y
 ```
 2. Create a virtual environment:
    
-
-```python3 -m venv .venv
+```
+python3 -m venv .venv
 ```
 3. Activate the python virtual enviroment
 
