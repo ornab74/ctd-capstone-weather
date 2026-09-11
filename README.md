@@ -68,3 +68,6 @@ python weather_scraper.py
 streamlit run streamlit_app.py
 
  ```
+
+# License 
+GPL3 
