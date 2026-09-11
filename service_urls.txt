@@ -1,0 +1,2 @@
+# Note: I used my own hosting and domain using a docker container and Cloudflare because I already owned my owned domain name to serve my streamlit app
+STREAMLIT_APP_URL=https://weather.qroadscan.com/
